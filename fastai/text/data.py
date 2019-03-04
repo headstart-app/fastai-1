@@ -5,6 +5,8 @@ from ..basic_data import *
 from ..data_block import *
 from ..layers import *
 from ..callback import Callback
+import pdb
+
 
 __all__ = ['LanguageModelPreLoader', 'SortSampler', 'SortishSampler', 'TextList', 'pad_collate', 'TextDataBunch',
            'TextLMDataBunch', 'TextClasDataBunch', 'Text', 'open_text', 'TokenizeProcessor', 'NumericalizeProcessor',
@@ -194,11 +196,13 @@ class TextDataBunch(DataBunch):
         "Create a `TextDataBunch` from DataFrames. `kwargs` are passed to the dataloader creation."
         processor = _get_processor(tokenizer=tokenizer, vocab=vocab, chunksize=chunksize, max_vocab=max_vocab,
                                    min_freq=min_freq, mark_fields=mark_fields)
-        if classes is None and is_listy(label_cols) and len(label_cols) > 1: classes = label_cols
+        pdb.set_trace(  )                           
+        if classes is None and is_listy(label_cols) and len(label_cols) > 1 and 'multi_task_list' not in kwargs: classes = label_cols
+            
         src = ItemLists(path, TextList.from_df(train_df, path, cols=text_cols, processor=processor),
                         TextList.from_df(valid_df, path, cols=text_cols, processor=processor))
         if cls==TextLMDataBunch: src = src.label_for_lm() 
-        else: src = src.label_from_df(cols=label_cols, classes=classes, label_delim=label_delim)
+        else: src = src.label_from_df(cols=label_cols, classes=classes, label_delim=label_delim, **kwargs)
         if test_df is not None: src.add_test(TextList.from_df(test_df, path, cols=text_cols))
         return src.databunch(**kwargs)
 
@@ -255,7 +259,9 @@ class TextClasDataBunch(TextDataBunch):
         datasets = cls._init_ds(train_ds, valid_ds, test_ds)
         val_bs = ifnone(val_bs, bs)
         collate_fn = partial(pad_collate, pad_idx=pad_idx, pad_first=pad_first, backwards=backwards)
+            
         train_sampler = SortishSampler(datasets[0].x, key=lambda t: len(datasets[0][t][0].data), bs=bs//2)
+        kwargs.pop('multi_task_list', None)
         train_dl = DataLoader(datasets[0], batch_size=bs, sampler=train_sampler, drop_last=True, **kwargs)
         dataloaders = [train_dl]
         for ds in datasets[1:]:
@@ -263,6 +269,24 @@ class TextClasDataBunch(TextDataBunch):
             sampler = SortSampler(ds.x, key=lengths.__getitem__)
             dataloaders.append(DataLoader(ds, batch_size=val_bs, sampler=sampler, **kwargs))
         return cls(*dataloaders, path=path, device=device, collate_fn=collate_fn, no_check=no_check)
+
+class TextMultiClasDataBunch(TextDataBunch):
+    "Create a `TextDataBunch` suitable for training an RNN classifier."
+    @classmethod
+    def create(cls, train_ds, valid_ds, test_ds=None, path:PathOrStr='.', bs:int=32, val_bs:int=None, pad_idx=1, 
+               pad_first=True, device:torch.device=None, no_check:bool=False, backwards:bool=False, **kwargs) -> DataBunch:
+        "Function that transform the `datasets` in a `DataBunch` for classification."
+        datasets = cls._init_ds(train_ds, valid_ds, test_ds)
+        val_bs = ifnone(val_bs, bs)
+        collate_fn = partial(pad_collate, pad_idx=pad_idx, pad_first=pad_first, backwards=backwards)
+        train_sampler = SortishSampler(datasets[0].x, key=lambda t: len(datasets[0][t][0].data), bs=bs//2)
+        train_dl = DataLoader(datasets[0], batch_size=bs, sampler=train_sampler, drop_last=True, **kwargs)
+        dataloaders = [train_dl]
+        for ds in datasets[1:]:
+            lengths = [len(t) for t in ds.x.items]
+            sampler = SortSampler(ds.x, key=lengths.__getitem__)
+            dataloaders.append(DataLoader(ds, batch_size=val_bs, sampler=sampler, **kwargs))
+        return cls(*dataloaders, path=path, device=device, collate_fn=collate_fn, no_check=no_check)        
 
 def open_text(fn:PathOrStr, enc='utf-8'):
     "Read the text in `fn`."
@@ -297,6 +321,7 @@ class NumericalizeProcessor(PreProcessor):
     def process_one(self,item): return np.array(self.vocab.numericalize(item), dtype=np.int64)
     def process(self, ds):
         if self.vocab is None: self.vocab = Vocab.create(ds.items, self.max_vocab, self.min_freq)
+            
         ds.vocab = self.vocab
         super().process(ds)
 

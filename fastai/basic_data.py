@@ -161,7 +161,8 @@ class DataBunch():
         dl = self.dl(ds_type)
         w = self.num_workers
         self.num_workers = 0
-        try:     x,y = next(iter(dl))
+        try:     
+            x,y = next(iter(dl))
         finally: self.num_workers = w
         if detach: x,y = to_detach(x,cpu=cpu),to_detach(y,cpu=cpu)
         norm = getattr(self,'norm',False)

@@ -250,14 +250,32 @@ def get_text_classifier(arch:Callable, vocab_sz:int, n_class:int, bptt:int=70, m
     model = SequentialRNN(encoder, PoolingLinearClassifier(layers, ps))
     return model if init is None else model.apply(init)
 
+def get_multitask_text_classifier(arch:Callable, vocab_sz:int, n_class:[int], bptt:int=70, max_len:int=20*70, config:dict=None, 
+                        drop_mult:float=1., lin_ftrs:Collection[int]=None, ps:Collection[float]=None) -> nn.Module:
+    "Create a text classifier from `arch` and its `config`, maybe `pretrained`."
+    meta = _model_meta[arch]
+    config = ifnone(config, meta['config_clas'].copy())
+    for k in config.keys(): 
+        if k.endswith('_p'): config[k] *= drop_mult
+    if lin_ftrs is None: lin_ftrs = [50]
+    if ps is None:  ps = [0.1]
+    layers = [config[meta['hid_name']] * 3] + lin_ftrs + [n_class]
+    ps = [config.pop('output_p')] + ps
+    init = config.pop('init') if 'init' in config else None
+    encoder = MultiBatchEncoder(bptt, max_len, arch(vocab_sz, **config))
+    model = SequentialRNN(encoder, PoolingMultiTaskLinearClassifier(layers, ps))
+    return model if init is None else model.apply(init)    
+
 def text_classifier_learner(data:DataBunch, arch:Callable, bptt:int=70, max_len:int=70*20, config:dict=None, 
                             pretrained:bool=True, drop_mult:float=1., lin_ftrs:Collection[int]=None, 
                             ps:Collection[float]=None, **learn_kwargs) -> 'TextClassifierLearner':
     "Create a `Learner` with a text classifier from `data` and `arch`."
-    model = get_text_classifier(arch, len(data.vocab.itos), data.c, bptt=bptt, max_len=max_len,
+    model = get_multitask_text_classifier(arch, len(data.vocab.itos), data.c, bptt=bptt, max_len=max_len,
                                 config=config, drop_mult=drop_mult, lin_ftrs=lin_ftrs, ps=ps)
     meta = _model_meta[arch]
     learn = RNNLearner(data, model, split_func=meta['split_clas'], **learn_kwargs)
+    learner_callback = MultiTaskClassLearner(learn)
+    learn.callbacks.append(learner_callback)
     if pretrained:
         if 'url' not in meta: 
             warn("There are no pretrained weights for that architecture yet!")

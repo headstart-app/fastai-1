@@ -1,9 +1,10 @@
 from ...torch_core import *
 from ...layers import *
+import pdb
 
-__all__ = ['EmbeddingDropout', 'LinearDecoder', 'PoolingLinearClassifier', 'AWD_LSTM', 'RNNDropout', 
-           'SequentialRNN', 'WeightDropout', 'dropout_mask', 'awd_lstm_lm_split', 'awd_lstm_clas_split',
-           'awd_lstm_lm_config', 'awd_lstm_clas_config']
+__all__ = ['EmbeddingDropout', 'LinearDecoder', 'PoolingLinearClassifier', 'PoolingMultiTaskLinearClassifier', 
+           'AWD_LSTM', 'RNNDropout', 'SequentialRNN', 'WeightDropout', 'dropout_mask', 'awd_lstm_lm_split', 
+           'awd_lstm_clas_split', 'awd_lstm_lm_config', 'awd_lstm_clas_config']
 
 def dropout_mask(x:Tensor, sz:Collection[int], p:float):
     "Return a dropout mask of the same type as `x`, size `sz`, with probability `p` to cancel an element."
@@ -163,11 +164,13 @@ class PoolingLinearClassifier(nn.Module):
         activs = [nn.ReLU(inplace=True)] * (len(layers) - 2) + [None]
         for n_in,n_out,p,actn in zip(layers[:-1],layers[1:], drops, activs):
             mod_layers += bn_drop_lin(n_in, n_out, p=p, actn=actn)
+
         self.layers = nn.Sequential(*mod_layers)
 
     def pool(self, x:Tensor, bs:int, is_max:bool):
         "Pool the tensor along the seq_len dimension."
         f = F.adaptive_max_pool1d if is_max else F.adaptive_avg_pool1d
+        
         return f(x.transpose(1,2), (1,)).view(bs,-1)
 
     def forward(self, input:Tuple[Tensor,Tensor])->Tuple[Tensor,Tensor,Tensor]:
@@ -177,8 +180,46 @@ class PoolingLinearClassifier(nn.Module):
         avgpool = self.pool(output, bs, False)
         mxpool = self.pool(output, bs, True)
         x = torch.cat([output[:,-1], mxpool, avgpool], 1)
+        
         x = self.layers(x)
         return x, raw_outputs, outputs
+
+class PoolingMultiTaskLinearClassifier(nn.Module):
+    "Create a linear classifier with pooling."
+
+    def __init__(self, layers:Collection[int], drops:Collection[float]):
+        super().__init__()
+        mod_layers = []
+        activs = [nn.ReLU(inplace=True)] * (len(layers) - 2) + [None]
+        last = layers[-1:][0]
+        layers = layers[:-1]
+        
+        self.num_lin = len(last)
+        for n_in,n_out,p,actn in zip(layers[:-1],layers[1:], drops, activs):
+            mod_layers += bn_drop_lin(n_in, n_out, p=p, actn=actn)
+        self.layers = nn.Sequential(*mod_layers)
+        for i in range(self.num_lin):
+            setattr(self, "lin%d" % i, nn.Linear(layers[-1:][0], last[i]))
+
+    def pool(self, x:Tensor, bs:int, is_max:bool):
+        "Pool the tensor along the seq_len dimension."
+        f = F.adaptive_max_pool1d if is_max else F.adaptive_avg_pool1d
+        return f(x.transpose(1,2), (1,)).view(bs,-1)
+
+    def forward(self, input:Tuple[Tensor,Tensor])->Tuple[Tensor,Tensor,Tensor]:
+        
+        raw_outputs, outputs = input
+        output = outputs[-1]
+        bs,sl,_ = output.size()
+        avgpool = self.pool(output, bs, False)
+        mxpool = self.pool(output, bs, True)
+        x = torch.cat([output[:,-1], mxpool, avgpool], 1)
+        x = self.layers(x)
+        class_outs = {}
+        for i in range(self.num_lin):
+            class_outs["lin%d" % i] = getattr(self, "lin%d" % i)(x)
+        
+        return class_outs, raw_outputs, outputs        
 
 def awd_lstm_lm_split(model:nn.Module) -> List[nn.Module]:
     "Split a RNN `model` in groups for differential learning rates."

@@ -145,6 +145,9 @@ class Callback():
     def on_loss_begin(self, **kwargs:Any)->None:
         "Called after forward pass but before loss has been computed. Returns the output (which can allow us to modify it)."
         pass
+    def on_mulit_loss_begin(self, **kwargs:Any)->None:
+        "Called after forward pass but before loss has been computed when there are more than one label type. Returns the output and target (which can allow us to modify it)."
+        pass        
     def on_backward_begin(self, **kwargs:Any)->None:
         """Called after the forward pass and the loss has been computed, but before backprop.
            Returns the loss (which can allow us to modify it, for instance for reg functions)"""
@@ -250,8 +253,19 @@ class CallbackHandler():
             if a is not None: self.state_dict['last_output'] = a
         return self.state_dict['last_output']
 
+    def on_multi_loss_begin(self, predicted:dict, labels:list)->(Tensor, Tensor):
+        "Handle start of loss calculation with model output `out`."
+        for cb in self.callbacks:
+            if hasattr(cb, 'on_multi_loss_begin'):
+                p, l = cb.on_multi_loss_begin(predicted, labels)
+                if p is not None and l is not None: 
+                    return p, l
+        return predicted, labels        
+
     def on_backward_begin(self, loss:Tensor)->None:
         "Handle gradient calculation on `loss`."
+        
+
         self.smoothener.add_value(loss.detach().cpu())
         self.state_dict['last_loss'], self.state_dict['smooth_loss'] = loss, self.smoothener.smooth
         for cb in self.callbacks:
@@ -262,6 +276,7 @@ class CallbackHandler():
     def on_backward_end(self)->None:
         "Handle end of gradient calculation."
         self('backward_end', False)
+
     def on_step_end(self)->None:
         "Handle end of optimization step."
         self('step_end', False)

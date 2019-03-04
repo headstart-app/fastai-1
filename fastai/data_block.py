@@ -2,6 +2,7 @@ from .torch_core import *
 from .basic_data import *
 from .layers import *
 from numbers import Integral
+import pdb
 
 __all__ = ['ItemList', 'CategoryList', 'MultiCategoryList', 'MultiCategoryProcessor', 'LabelList', 'ItemLists', 'get_files',
            'PreProcessor', 'LabelLists', 'FloatList', 'CategoryProcessor', 'EmptyLabelList']
@@ -47,7 +48,7 @@ class ItemList():
     _bunch,_processor,_label_cls,_square_show,_square_show_res = DataBunch,None,None,False,False
 
     def __init__(self, items:Iterator, path:PathOrStr='.', label_cls:Callable=None, xtra:Any=None, 
-                 processor:PreProcessors=None, x:'ItemList'=None, ignore_empty:bool=False):
+                 processor:PreProcessors=None, x:'ItemList'=None, ignore_empty:bool=False, multi_task_list:bool=False):
         self.path = Path(path)
         self.num_parts = len(self.path.parts)
         self.items,self.x,self.ignore_empty = items,x,ignore_empty
@@ -232,17 +233,26 @@ class ItemList():
         "Label `self.items` with `labels`."
         labels = array(labels, dtype=object)
         label_cls = self.get_label_cls(labels, label_cls=label_cls, **kwargs)
+        if 'multi_task_list' in kwargs and kwargs['multi_task_list']:
+            ys = []
+            for label in np.rot90(labels):
+                ys.append(CategoryList(label, path=self.path, **kwargs))
+            ys.reverse()  
+            res = MultiLabelList(x=self, y=ys)
+            return res
         y = label_cls(labels, path=self.path, **kwargs)
         res = self._label_list(x=self, y=y)
         return res
 
     def label_from_df(self, cols:IntsOrStrs=1, label_cls:Callable=None, **kwargs):
         "Label `self.items` from the values in `cols` in `self.xtra`."
+           
         labels = self.xtra.iloc[:,df_names_to_idx(cols, self.xtra)]
         assert labels.isna().sum().sum() == 0, f"You have NaN values in column(s) {cols} of your dataframe, please fix it." 
-        if is_listy(cols) and len(cols) > 1 and (label_cls is None or label_cls == MultiCategoryList): 
+        not_multi_task = not ('multi_task_list' in kwargs and kwargs['multi_task_list'])
+        if is_listy(cols) and len(cols) > 1 and (label_cls is None or label_cls == MultiCategoryList) and not_multi_task:
             new_kwargs,label_cls = dict(one_hot=True, classes= cols),MultiCategoryList
-            kwargs = {**new_kwargs, **kwargs}
+            kwargs = {**new_kwargs, **kwargs}            
         return self.label_from_list(_maybe_squeeze(labels), label_cls=label_cls, **kwargs)
 
     def label_const(self, const:Any=0, label_cls:Callable=None, **kwargs)->'LabelList':
@@ -323,6 +333,7 @@ class CategoryList(CategoryListBase):
     _processor=CategoryProcessor
     def __init__(self, items:Iterator, classes:Collection=None, label_delim:str=None, **kwargs):
         super().__init__(items, classes=classes, **kwargs)
+        
         self.loss_func = CrossEntropyFlat()
 
     def get(self, i):
@@ -421,16 +432,21 @@ class ItemLists():
         return f'{self.__class__.__name__};\n\nTrain: {self.train};\n\nValid: {self.valid};\n\nTest: {self.test}'
 
     def __getattr__(self, k):
+        
         ft = getattr(self.train, k)
         if not isinstance(ft, Callable): return ft
         fv = getattr(self.valid, k)
         assert isinstance(fv, Callable)
         def _inner(*args, **kwargs):
             self.train = ft(*args, **kwargs)
-            assert isinstance(self.train, LabelList)
-            kwargs['label_cls'] = self.train.y.__class__
-            self.valid = fv(*args, **kwargs)
-            self.__class__ = LabelLists
+            if isinstance(self.train, LabelList):
+                kwargs['label_cls'] = self.train.y.__class__
+                self.valid = fv(*args, **kwargs)
+                self.__class__ = LabelLists
+            elif isinstance(self.train, MultiLabelList):
+                kwargs['label_cls'] = self.train.y[0].__class__
+                self.valid = fv(*args, **kwargs)
+                self.__class__ = LabelLists 
             self.process()
             return self
         return _inner
@@ -473,9 +489,16 @@ class LabelLists(ItemLists):
     "A `LabelList` for each of `train` and `valid` (optional `test`)."
     def get_processors(self):
         "Read the default class processors if none have been set."
-        procs_x,procs_y = listify(self.train.x._processor),listify(self.train.y._processor)
+        procs_x = listify(self.train.x._processor)
         xp = ifnone(self.train.x.processor, [p(ds=self.train.x) for p in procs_x])
-        yp = ifnone(self.train.y.processor, [p(ds=self.train.y) for p in procs_y])
+          
+        if type(self.train.y) is list:
+            procs_y = listify(self.train.y[0]._processor) 
+            yp = ifnone(self.train.y[0].processor, [[p(ds=_y) for _y in self.train.y] for p in procs_y][0])
+            
+        else:
+            procs_y = listify(self.train.y._processor)
+            yp = ifnone(self.train.y.processor, [p(ds=self.train.y) for p in procs_y])
         return xp,yp
 
     def process(self):
@@ -557,6 +580,7 @@ class LabelList(Dataset):
         self.item = None
 
     def __repr__(self)->str:
+        
         items = [self[i] for i in range(min(5,len(self.items)))]
         res = f'{self.__class__.__name__} ({len(self.items)} items)\n'
         res += f'x: {self.x.__class__.__name__}\n{show_some([i[0] for i in items])}\n'
@@ -678,6 +702,129 @@ class LabelList(Dataset):
     def databunch(self, **kwargs):
         "To throw a clear error message when the data wasn't split."
         raise Exception("Your data isn't split, if you don't want a validation set, please use `no_split`")
+
+class MultiLabelList(Dataset):
+    "A list of inputs `x` and labels `y` with optional `tfms`."
+    def __init__(self, x:ItemList, y:[ItemList], tfms:TfmList=None, tfm_y:bool=False, **kwargs):
+        self.x,self.y,self.tfm_y = x,y,tfm_y
+        for y in self.y:
+            y.x=x 
+        self.item=None
+        self.transform(tfms, **kwargs)
+
+    def __len__(self)->int: return len(self.x) if self.item is None else 1
+
+    @contextmanager
+    def set_item(self,item):
+        "For inference, will briefly replace the dataset with one that only contains `item`."
+        self.item = self.x.process_one(item)
+        yield None
+        self.item = None
+       
+    def predict(self, res):
+        "Delegates predict call on `res` to `self.y`."
+        return self.y.predict(res)     
+
+    def __getattr__(self,k:str)->Any:
+        x = super().__getattribute__('x')
+        res = getattr(x, k, None)
+        if isinstance(res, Callable):
+            assert 'split' not in res.__name__, "You should split your data before labelling it."
+        if res is not None: return res
+        raise AttributeError(k)
+
+    @property
+    def c(self): return [_y.c for _y in self.y] 
+
+    def new(self, x, y, **kwargs)->'LabelList':
+        if isinstance(x, ItemList) and isinstance(y, list):
+            return self.__class__(x, y, tfms=self.tfms, tfm_y=self.tfm_y, **self.tfmargs)
+        else:
+            return self.new(self.x.new(x, **kwargs), self.y.new(y, **kwargs)).process()
+                
+    def __setstate__(self,data:Any): self.__dict__.update(data)
+                
+    def __getitem__(self,idxs:Union[int,np.ndarray])->'LabelList':
+        idxs = try_int(idxs)
+        if isinstance(idxs, Integral):
+            if self.item is None: x,y = self.x[idxs],[_y[idxs] for _y in self.y]
+            else:                 x,y = self.item   ,0
+            if self.tfms or self.tfmargs:
+                x = x.apply_tfms(self.tfms, **self.tfmargs)
+            if hasattr(self, 'tfms_y') and self.tfm_y and self.item is None:
+                y = y.apply_tfms(self.tfms_y, **{**self.tfmargs_y, 'do_resolve':False})
+            if y is None: y=0
+            return x,y
+        else: return self.new(self.x[idxs], self.y[idxs])
+
+    def to_df(self)->None:
+        "Create `pd.DataFrame` containing `items` from `self.x` and `self.y`."
+        return pd.DataFrame(dict(x=self.x._relative_item_paths(), y=[';'.join(o) for o in self.y]))
+
+    def to_csv(self, dest:str)->None:
+        "Save `self.to_df()` to a CSV file in `self.path`/`dest`."
+        self.to_df().to_csv(self.path/dest, index=False)
+
+    def get_state(self, **kwargs):
+        "Return the minimal state for export."
+        
+        state = {'x_cls':self.x.__class__, 'x_proc':self.x.processor,
+                 'y_cls':self.y.__class__, 'y_proc':self.y.processor,
+                 'tfms':self.tfms, 'tfm_y':self.tfm_y, 'tfmargs':self.tfmargs}
+        if hasattr(self, 'tfms_y'):    state['tfms_y']    = self.tfms_y
+        if hasattr(self, 'tfmargs_y'): state['tfmargs_y'] = self.tfmargs_y
+        return {**state, **kwargs}
+                
+    def export(self, fn:PathOrStr, **kwargs):
+        "Export the minimal state and save it in `fn` to load an empty version for inference."
+        pickle.dump(self.get_state(**kwargs), open(fn, 'wb'))
+
+    @classmethod
+    def load_empty(cls, path:PathOrStr, fn:PathOrStr):
+        "Load the state in `fn` to create an empty `LabelList` for inference."
+        return cls.load_state(path, pickle.load(open(Path(path)/fn, 'rb')))
+    
+    @classmethod
+    def load_state(cls, path:PathOrStr, state:dict) -> 'LabelList':
+        "Create a `LabelList` from `state`."
+        x = state['x_cls']([], path=path, processor=state['x_proc'], ignore_empty=True)
+        y = state['y_cls']([], path=path, processor=state['y_proc'], ignore_empty=True)
+        res = cls(x, y, tfms=state['tfms'], tfm_y=state['tfm_y'], **state['tfmargs']).process()
+        if state.get('tfms_y', False):    res.tfms_y    = state['tfms_y']
+        if state.get('tfmargs_y', False): res.tfmargs_y = state['tfmargs_y']
+        if state.get('normalize', False): res.normalize = state['normalize']
+        return res
+
+    def process(self, xp:PreProcessor=None, yp:PreProcessor=None, name:str=None):
+        "Launch the processing on `self.x` and `self.y` with `xp` and `yp`."
+        self.x.process(xp)
+        for _y,_yp in zip(self.y, yp):
+            _y.process(_yp)
+
+        return self
+
+    def transform(self, tfms:TfmList, tfm_y:bool=None, **kwargs):
+        "Set the `tfms` and `tfm_y` value to be applied to the inputs and targets."
+        _check_kwargs(self.x, tfms, **kwargs)
+        if tfm_y is None: tfm_y = self.tfm_y
+        if tfm_y: _check_kwargs(self.y, tfms, **kwargs)
+        self.tfms,self.tfmargs = tfms,kwargs
+        self.tfm_y,self.tfms_y,self.tfmargs_y = tfm_y,tfms,kwargs
+        return self
+
+    def transform_y(self, tfms:TfmList=None, **kwargs):
+        "Set `tfms` to be applied to the targets only."
+        
+        _check_kwargs(self.y, tfms, **kwargs)
+        self.tfm_y=True
+        if tfms is None: self.tfms_y,self.tfmargs_y = self.tfms,{**self.tfmargs, **kwargs}
+        else:            self.tfms_y,self.tfmargs_y = tfms,kwargs
+        return self
+                
+    def databunch(self, **kwargs):
+        "To throw a clear error message when the data wasn't split."
+        raise Exception("Your data isn't split, if you don't want a validation set, please use `no_split`")
+
 
 @classmethod
 def _databunch_load_empty(cls, path, fname:str='export.pkl'):

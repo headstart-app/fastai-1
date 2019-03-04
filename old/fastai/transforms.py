@@ -619,7 +619,7 @@ class GoogleNetResize(CoordTransform):
 def compose(im, y, fns):
     """ Apply a collection of transformation functions :fns: to images """
     for fn in fns:
-        #pdb.set_trace()
+        #
         im, y =fn(im, y)
     return im if y is None else (im, y)
 

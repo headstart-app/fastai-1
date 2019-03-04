@@ -6,7 +6,7 @@ from .data_block import *
 from .utils.mem import gpu_mem_restore
 
 __all__ = ['Learner', 'LearnerCallback', 'Recorder', 'RecordOnCPU', 'fit', 'loss_batch', 'train_epoch', 'validate',
-           'get_preds', 'load_learner']
+           'get_preds', 'load_learner', 'MultiTaskClassLearner']
 
 defaults.lr = slice(3e-3)
 defaults.wd = 1e-2
@@ -21,6 +21,8 @@ def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor, loss_func:OptLossFunc=None
     out = cb_handler.on_loss_begin(out)
 
     if not loss_func: return to_detach(out), yb[0].detach()
+    out, yb = cb_handler.on_multi_loss_begin(out, yb[0])
+        
     loss = loss_func(out, *yb)
 
     if opt is not None:
@@ -78,7 +80,7 @@ def fit(epochs:int, model:nn.Module, loss_func:LossFunction, opt:optim.Optimizer
     cb_handler = CallbackHandler(callbacks, metrics)
     pbar = master_bar(range(epochs))
     cb_handler.on_train_begin(epochs, pbar=pbar, metrics=metrics)
-
+    
     exception=False
     try:
         for epoch in pbar:
@@ -399,6 +401,19 @@ class LearnerCallback(Callback):
 
     @property
     def cb_name(self): return camel2snake(self.__class__.__name__)
+
+
+class MultiTaskClassLearner(LearnerCallback):
+    "Callback to manage multi-task classifications scenarious."
+    learn:Learner
+    def on_multi_loss_begin(self, predicted:dict, labels:list, **kwargs:Any)->(Tensor, Tensor):
+        "Convert half precision output to FP32 to avoid reduction overflow."
+        predicted = torch.cat(list(predicted.values()))
+        newlabels = []
+        newlabels.append(torch.reshape(torch.transpose(labels, 0, 1), (-1,)))
+        
+        return predicted, newlabels
+
 
 class Recorder(LearnerCallback):
     "A `LearnerCallback` that records epoch, loss, opt and metric data during training."
