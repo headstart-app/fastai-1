@@ -225,7 +225,6 @@ class CallbackHandler():
 
     def on_train_begin(self, epochs:int, pbar:PBar, metrics:MetricFuncList)->None:
         "About to start learning."
-        pdb.set_trace()
         self.state_dict = _get_init_state()
         self.state_dict['n_epochs'],self.state_dict['pbar'],self.state_dict['metrics'] = epochs,pbar,metrics
         names = [(met.name if hasattr(met, 'name') else camel2snake(met.__class__.__name__)) for met in self.metrics]

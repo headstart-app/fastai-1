@@ -38,7 +38,6 @@ def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor,   loss_func:OptLossFunc=No
 def get_preds(model:nn.Module, dl:DataLoader, pbar:Optional[PBar]=None, cb_handler:Optional[CallbackHandler]=None,
               activ:nn.Module=None, loss_func:OptLossFunc=None, n_batch:Optional[int]=None) -> List[Tensor]:
     "Tuple of predictions and targets, and optional losses (if `loss_func`) using `dl`, max batches `n_batch`."
-    pdb.set_trace()
     res = [torch.cat(o).cpu() for o in
            zip(*validate(model, dl, cb_handler=cb_handler, pbar=pbar, average=False, n_batch=n_batch))]
     if loss_func is not None: res.append(calc_loss(res[0], res[1], loss_func))
@@ -63,7 +62,6 @@ def validate(model:nn.Module, dl:DataLoader, loss_func:OptLossFunc=None, cb_hand
         if average: 
             return (to_np(torch.stack(val_losses)) * nums).sum() / nums.sum()
         else:
-            pdb.set_trace()
             return val_losses
 
 def train_epoch(model:nn.Module, dl:DataLoader, opt:optim.Optimizer, loss_func:LossFunction)->None:
@@ -430,7 +428,6 @@ class MultiTaskClassLearner(LearnerCallback):
         "Convert half precision output to FP32 to avoid reduction overflow."
         predicted = torch.cat(list(predicted.values()))
         newlabels = []
-        pdb.set_trace()
         newlabels.append(torch.reshape(torch.transpose(labels, 0, 1), (-1,)))
         
         return predicted, newlabels
