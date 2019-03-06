@@ -1,5 +1,7 @@
 from ...torch_core import *
 from ...layers import *
+import torch.nn.functional as F
+
 import pdb
 
 __all__ = ['EmbeddingDropout', 'LinearDecoder', 'PoolingLinearClassifier', 'PoolingMultiTaskLinearClassifier', 
@@ -179,8 +181,7 @@ class PoolingLinearClassifier(nn.Module):
         bs,sl,_ = output.size()
         avgpool = self.pool(output, bs, False)
         mxpool = self.pool(output, bs, True)
-        x = torch.cat([output[:,-1], mxpool, avgpool], 1)
-        
+        x = torch.cat([output[:,-1], mxpool, avgpool], 1)       
         x = self.layers(x)
         return x, raw_outputs, outputs
 
@@ -217,7 +218,7 @@ class PoolingMultiTaskLinearClassifier(nn.Module):
         x = self.layers(x)
         class_outs = {}
         for i in range(self.num_lin):
-            class_outs["lin%d" % i] = getattr(self, "lin%d" % i)(x)
+            class_outs["lin%d" % i] = F.log_softmax(getattr(self, "lin%d" % i)(x),1)
         
         return class_outs, raw_outputs, outputs        
 

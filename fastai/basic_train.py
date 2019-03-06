@@ -4,6 +4,7 @@ from .basic_data import *
 from .callback import *
 from .data_block import *
 from .utils.mem import gpu_mem_restore
+import pdb
 
 __all__ = ['Learner', 'LearnerCallback', 'Recorder', 'RecordOnCPU', 'fit', 'loss_batch', 'train_epoch', 'validate',
            'get_preds', 'load_learner', 'MultiTaskClassLearner']
@@ -11,7 +12,7 @@ __all__ = ['Learner', 'LearnerCallback', 'Recorder', 'RecordOnCPU', 'fit', 'loss
 defaults.lr = slice(3e-3)
 defaults.wd = 1e-2
 
-def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor, loss_func:OptLossFunc=None, opt:OptOptimizer=None,
+def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor,   loss_func:OptLossFunc=None, opt:OptOptimizer=None,
                cb_handler:Optional[CallbackHandler]=None)->Tuple[Union[Tensor,int,float,str]]:
     "Calculate loss and metrics for a batch, call out to callbacks as necessary."
     cb_handler = ifnone(cb_handler, CallbackHandler())
@@ -19,12 +20,11 @@ def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor, loss_func:OptLossFunc=None
     if not is_listy(yb): yb = [yb]
     out = model(*xb)
     out = cb_handler.on_loss_begin(out)
-
     if not loss_func: return to_detach(out), yb[0].detach()
     out, yb = cb_handler.on_multi_loss_begin(out, yb[0])
+
         
     loss = loss_func(out, *yb)
-
     if opt is not None:
         loss = cb_handler.on_backward_begin(loss)
         loss.backward()
@@ -38,6 +38,7 @@ def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor, loss_func:OptLossFunc=None
 def get_preds(model:nn.Module, dl:DataLoader, pbar:Optional[PBar]=None, cb_handler:Optional[CallbackHandler]=None,
               activ:nn.Module=None, loss_func:OptLossFunc=None, n_batch:Optional[int]=None) -> List[Tensor]:
     "Tuple of predictions and targets, and optional losses (if `loss_func`) using `dl`, max batches `n_batch`."
+    pdb.set_trace()
     res = [torch.cat(o).cpu() for o in
            zip(*validate(model, dl, cb_handler=cb_handler, pbar=pbar, average=False, n_batch=n_batch))]
     if loss_func is not None: res.append(calc_loss(res[0], res[1], loss_func))
@@ -59,8 +60,11 @@ def validate(model:nn.Module, dl:DataLoader, loss_func:OptLossFunc=None, cb_hand
             if cb_handler and cb_handler.on_batch_end(val_losses[-1]): break
             if n_batch and (len(nums)>=n_batch): break
         nums = np.array(nums, dtype=np.float32)
-        if average: return (to_np(torch.stack(val_losses)) * nums).sum() / nums.sum()
-        else:       return val_losses
+        if average: 
+            return (to_np(torch.stack(val_losses)) * nums).sum() / nums.sum()
+        else:
+            pdb.set_trace()
+            return val_losses
 
 def train_epoch(model:nn.Module, dl:DataLoader, opt:optim.Optimizer, loss_func:LossFunction)->None:
     "Simple training of `model` for 1 epoch of `dl` using optim `opt` and loss function `loss_func`."
@@ -90,6 +94,7 @@ def fit(epochs:int, model:nn.Module, loss_func:LossFunction, opt:optim.Optimizer
             for xb,yb in progress_bar(data.train_dl, parent=pbar):
                 xb, yb = cb_handler.on_batch_begin(xb, yb)
                 loss = loss_batch(model, xb, yb, loss_func, opt, cb_handler)
+
                 if cb_handler.on_batch_end(loss): break
 
             if not data.empty_val:
@@ -311,14 +316,20 @@ class Learner():
         cb_handler = CallbackHandler(self.callbacks)
         xb,yb = cb_handler.on_batch_begin(xb,yb, train=False)
         preds = loss_batch(self.model.eval(), xb, yb, cb_handler=cb_handler)
-        res = _loss_func2activ(self.loss_func)(preds[0])
-        if not reconstruct: return res
-        res = res.detach().cpu()
-        ds = self.dl(ds_type).dataset
-        norm = getattr(self.data, 'norm', False)
-        if norm and norm.keywords.get('do_y',False):
-            res = self.data.denorm(res, do_x=True)
-        return [ds.reconstruct(o) for o in res]
+        if isinstance(preds[0], dict):
+            res = []
+            for e in preds[0].values():
+                res.append(_loss_func2activ(self.loss_func)(e))
+            return [res]
+        else:    
+            res = _loss_func2activ(self.loss_func)(preds[0])
+            if not reconstruct: return res
+            res = res.detach().cpu()
+            ds = self.dl(ds_type).dataset
+            norm = getattr(self.data, 'norm', False)
+            if norm and norm.keywords.get('do_y',False):
+                res = self.data.denorm(res, do_x=True)
+            return [ds.reconstruct(o) for o in res]
 
     def backward(self, item):
         "Pass `item` through the model and computes the gradient. Useful if `backward_hooks` are attached."
@@ -332,14 +343,23 @@ class Learner():
         batch = self.data.one_item(item)
         res = self.pred_batch(batch=batch)
         pred,x = res[0],batch[0]
+
         norm = getattr(self.data,'norm',False)
         if norm:
             x = self.data.denorm(x)
             if norm.keywords.get('do_y',False): pred = self.data.denorm(pred)
         ds = self.data.single_ds
-        pred = ds.y.analyze_pred(pred, **kwargs)
-        out = ds.y.reconstruct(pred, ds.x.reconstruct(x[0])) if has_arg(ds.y.reconstruct, 'x') else ds.y.reconstruct(pred)
-        return out, pred, res[0]
+        if isinstance(pred, list):
+            preds = []
+            out = []
+            for i,e in enumerate(pred):
+                elem = ds.y[i].analyze_pred(e, **kwargs)
+                preds.append(elem)
+                out.append(ds.y[i].reconstruct(elem, ds.x.reconstruct(x[0])) if has_arg(ds.y[i].reconstruct, 'x') else ds.y[i].reconstruct(elem))
+        else:
+            preds = ds.y.analyze_pred(pred, **kwargs)
+            out = ds.y.reconstruct(preds, ds.x.reconstruct(x[0])) if has_arg(ds.y.reconstruct, 'x') else ds.y.reconstruct(preds)        
+        return out, preds, res[0]
 
     def validate(self, dl=None, callbacks=None, metrics=None):
         "Validate on `dl` with potential `callbacks` and `metrics`."
@@ -410,6 +430,7 @@ class MultiTaskClassLearner(LearnerCallback):
         "Convert half precision output to FP32 to avoid reduction overflow."
         predicted = torch.cat(list(predicted.values()))
         newlabels = []
+        pdb.set_trace()
         newlabels.append(torch.reshape(torch.transpose(labels, 0, 1), (-1,)))
         
         return predicted, newlabels

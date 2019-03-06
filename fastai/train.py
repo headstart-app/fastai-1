@@ -112,7 +112,9 @@ class ClassificationInterpretation():
 
     def confusion_matrix(self, slice_size:int=1):
         "Confusion matrix as an `np.ndarray`."
-        x=torch.arange(0,self.data.c)
+        
+        dim  = sum(self.data.c) if isinstance(self.data.c, list) else self.data.c
+        x=torch.arange(0, dim)
         if slice_size is None: cm = ((self.pred_class==x[:,None]) & (self.y_true==x[:,None,None])).sum(2)
         else:
             cm = torch.zeros(self.data.c, self.data.c, dtype=x.dtype)
