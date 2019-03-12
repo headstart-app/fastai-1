@@ -540,18 +540,21 @@ class LabelLists(ItemLists):
         return self.add_test(items.items, label=label)
                 
     @classmethod
-    def load_state(cls, path:PathOrStr, state:dict):
+    def load_state(cls, path:PathOrStr, state:dict, learner):
         "Create a `LabelLists` with empty sets from the serialized `state`."
+        _cls = LabelList
+        if 'MultiTaskClassLearner' in str(learner):
+            _cls = MultiLabelList
         path = Path(path)
-        train_ds = LabelList.load_state(path, state)
-        valid_ds = LabelList.load_state(path, state)
+        train_ds = _cls.load_state(path, state)
+        valid_ds = _cls.load_state(path, state)
         return LabelLists(path, train=train_ds, valid=valid_ds)
 
     @classmethod
     def load_empty(cls, path:PathOrStr, fn:PathOrStr='export.pkl'):
         "Create a `LabelLists` with empty sets from the serialized file in `path/fn`."      
         state = pickle.load(open(path/fn, 'rb'))
-        return LabelLists.load_state(path, state)
+        return LabelLists.load_state(path, state, cls)
 
 def _check_kwargs(ds:ItemList, tfms:TfmList, **kwargs):
     tfms = listify(tfms)
@@ -767,9 +770,8 @@ class MultiLabelList(Dataset):
 
     def get_state(self, **kwargs):
         "Return the minimal state for export."
-        
         state = {'x_cls':self.x.__class__, 'x_proc':self.x.processor,
-                 'y_cls':self.y.__class__, 'y_proc':self.y.processor,
+                 'y_cls':[_y.__class__ for _y in self.y], 'y_proc': [_y.processor for _y in self.y],
                  'tfms':self.tfms, 'tfm_y':self.tfm_y, 'tfmargs':self.tfmargs}
         if hasattr(self, 'tfms_y'):    state['tfms_y']    = self.tfms_y
         if hasattr(self, 'tfmargs_y'): state['tfmargs_y'] = self.tfmargs_y
@@ -788,7 +790,9 @@ class MultiLabelList(Dataset):
     def load_state(cls, path:PathOrStr, state:dict) -> 'LabelList':
         "Create a `LabelList` from `state`."
         x = state['x_cls']([], path=path, processor=state['x_proc'], ignore_empty=True)
-        y = state['y_cls']([], path=path, processor=state['y_proc'], ignore_empty=True)
+        y = []
+        for _class, _processor in zip(state['y_cls'],state['y_proc']):
+            y.append(_class([], path=path, processor=_processor, ignore_empty=True))
         res = cls(x, y, tfms=state['tfms'], tfm_y=state['tfm_y'], **state['tfmargs']).process()
         if state.get('tfms_y', False):    res.tfms_y    = state['tfms_y']
         if state.get('tfmargs_y', False): res.tfmargs_y = state['tfmargs_y']

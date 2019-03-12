@@ -22,9 +22,14 @@ def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor,   loss_func:OptLossFunc=No
     out = cb_handler.on_loss_begin(out)
     if not loss_func: return to_detach(out), yb[0].detach()
     out, yb = cb_handler.on_multi_loss_begin(out, yb[0])
-
-        
-    loss = loss_func(out, *yb)
+    loss = 0
+    if isinstance(out, list):
+        n = len(out)
+        for i in range(n):
+            loss += loss_func(out[i], yb[:,i])
+        loss = loss/n     
+    else:    
+        loss = loss_func(out, *yb)
     if opt is not None:
         loss = cb_handler.on_backward_begin(loss)
         loss.backward()
@@ -38,10 +43,20 @@ def loss_batch(model:nn.Module, xb:Tensor, yb:Tensor,   loss_func:OptLossFunc=No
 def get_preds(model:nn.Module, dl:DataLoader, pbar:Optional[PBar]=None, cb_handler:Optional[CallbackHandler]=None,
               activ:nn.Module=None, loss_func:OptLossFunc=None, n_batch:Optional[int]=None) -> List[Tensor]:
     "Tuple of predictions and targets, and optional losses (if `loss_func`) using `dl`, max batches `n_batch`."
-    res = [torch.cat(o).cpu() for o in
-           zip(*validate(model, dl, cb_handler=cb_handler, pbar=pbar, average=False, n_batch=n_batch))]
-    if loss_func is not None: res.append(calc_loss(res[0], res[1], loss_func))
-    if activ is not None: res[0] = activ(res[0])
+    val_losses = validate(model, dl, cb_handler=cb_handler, pbar=pbar, average=False, n_batch=n_batch)
+    if isinstance(val_losses[0][0], dict):
+        res = []
+        keys = val_losses[0][0].keys()
+        predicted = [torch.cat([o[0][key].cpu() for o in val_losses]) for key in keys]
+        observed = torch.cat([o[1].cpu() for o in val_losses])
+        res.append(predicted)
+        res.append(observed)
+        if loss_func is not None: res.append([calc_loss(r0, r1, loss_func) for r0, r1 in zip(res[0], res[1])])
+        if activ is not None: res[0] = [activ(r) for r in res[0]]
+    else:
+        res = [torch.cat(o).cpu() for o in zip(val_losses)]
+        if loss_func is not None: res.append(calc_loss(res[0], res[1], loss_func))
+        if activ is not None: res[0] = activ(res[0])
     return res
 
 def validate(model:nn.Module, dl:DataLoader, loss_func:OptLossFunc=None, cb_handler:Optional[CallbackHandler]=None,
@@ -317,7 +332,16 @@ class Learner():
         if isinstance(preds[0], dict):
             res = []
             for e in preds[0].values():
-                res.append(_loss_func2activ(self.loss_func)(e))
+                tmp_res = _loss_func2activ(self.loss_func)(e)
+                if not reconstruct: 
+                    tmp_res = tmp_res.detach().cpu()
+                    res.append(tmp_res)
+                else:    
+                    ds = self.dl(ds_type).dataset
+                    norm = getattr(self.data, 'norm', False)
+                    if norm and norm.keywords.get('do_y',False):
+                        tmp_res = self.data.denorm(tmp_res, do_x=True)
+                    res.append([ds.reconstruct(o) for o in tmp_res])
             return [res]
         else:    
             res = _loss_func2activ(self.loss_func)(preds[0])
@@ -426,11 +450,9 @@ class MultiTaskClassLearner(LearnerCallback):
     learn:Learner
     def on_multi_loss_begin(self, predicted:dict, labels:list, **kwargs:Any)->(Tensor, Tensor):
         "Convert half precision output to FP32 to avoid reduction overflow."
-        predicted = torch.cat(list(predicted.values()))
-        newlabels = []
-        newlabels.append(torch.reshape(torch.transpose(labels, 0, 1), (-1,)))
-        
-        return predicted, newlabels
+        predicted = list(predicted.values())   
+        labels     
+        return predicted, labels
 
 
 class Recorder(LearnerCallback):
@@ -558,7 +580,8 @@ def load_learner(path:PathOrStr, fname:PathOrStr='export.pkl', test:ItemList=Non
     "Load a `Learner` object saved with `export_state` in `path/fn` with empty data, optionally add `test` and load on `cpu`."
     state = torch.load(Path(path)/fname, map_location='cpu') if defaults.device == torch.device('cpu') else torch.load(Path(path)/fname)
     model = state.pop('model')
-    src = LabelLists.load_state(path, state.pop('data'))
+    learner = list(state['cb_state'].keys())[-1]      
+    src = LabelLists.load_state(path, state.pop('data'), learner)
     if test is not None: src.add_test(test)
     data = src.databunch()
     cb_state = state.pop('cb_state')

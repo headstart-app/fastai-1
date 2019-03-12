@@ -6,7 +6,7 @@ from .callback import *
 __all__ = ['error_rate', 'accuracy', 'accuracy_thresh', 'dice', 'exp_rmspe', 'fbeta','FBeta', 'mse', 'mean_squared_error',
             'mae', 'mean_absolute_error', 'rmse', 'root_mean_squared_error', 'msle', 'mean_squared_logarithmic_error', 
             'explained_variance', 'r2_score', 'top_k_accuracy', 'KappaScore', 'ConfusionMatrix', 'MatthewsCorreff', 
-            'Precision', 'Recall', 'R2Score', 'ExplainedVariance', 'ExpRMSPE', 'RMSE']
+            'Precision', 'Recall', 'R2Score', 'ExplainedVariance', 'ExpRMSPE', 'RMSE', 'multi_task_accuracy']
 
 
 def fbeta(y_pred:Tensor, y_true:Tensor, thresh:float=0.2, beta:float=2, eps:float=1e-9, sigmoid:bool=True)->Rank0Tensor:
@@ -27,6 +27,17 @@ def accuracy(input:Tensor, targs:Tensor)->Rank0Tensor:
     input = input.argmax(dim=-1).view(n,-1)
     targs = targs.view(n,-1)
     return (input==targs).float().mean()
+
+def multi_task_accuracy(input:list, targs:Tensor)->Rank0Tensor:
+    "Compute accuracy with `targs` when `input` is bs * n_classes."
+    m = len(input)
+    means = 0
+    for i, key in enumerate(input):
+        n = targs[:,i].shape[0]
+        _input = input[key].argmax(dim=-1).view(n,-1)
+        _targs = targs[:,i].view(n,-1)
+        means += (_input==_targs).float().mean()
+    return means/m
 
 def accuracy_thresh(y_pred:Tensor, y_true:Tensor, thresh:float=0.5, sigmoid:bool=True)->Rank0Tensor:
     "Compute accuracy when `y_pred` and `y_true` are the same size."

@@ -6,6 +6,7 @@ from ..data_block import CategoryList
 from ..basic_data import *
 from ..datasets import *
 from ..metrics import accuracy
+from ..metrics import multi_task_accuracy
 from ..train import GradientClipping
 from .models import *
 from .transform import *
