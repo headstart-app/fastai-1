@@ -269,14 +269,20 @@ def get_multitask_text_classifier(arch:Callable, vocab_sz:int, n_class:[int], bp
 
 def text_classifier_learner(data:DataBunch, arch:Callable, bptt:int=70, max_len:int=70*20, config:dict=None, 
                             pretrained:bool=True, drop_mult:float=1., lin_ftrs:Collection[int]=None, 
-                            ps:Collection[float]=None, **learn_kwargs) -> 'TextClassifierLearner':
+                            ps:Collection[float]=None, mutlitask = True, **learn_kwargs) -> 'TextClassifierLearner':
     "Create a `Learner` with a text classifier from `data` and `arch`."
-    model = get_multitask_text_classifier(arch, len(data.vocab.itos), data.c, bptt=bptt, max_len=max_len,
+    if mutlitask:
+        model = get_multitask_text_classifier(arch, len(data.vocab.itos), data.c, bptt=bptt, max_len=max_len,
                                 config=config, drop_mult=drop_mult, lin_ftrs=lin_ftrs, ps=ps)
+    else:
+        model = get_text_classifier(arch, len(data.vocab.itos), data.c, bptt=bptt, max_len=max_len,
+                                config=config, drop_mult=drop_mult, lin_ftrs=lin_ftrs, ps=ps)                           
     meta = _model_meta[arch]
     learn = RNNLearner(data, model, split_func=meta['split_clas'], **learn_kwargs)
-    learner_callback = MultiTaskClassLearner(learn)
-    learn.callbacks.append(learner_callback)
+    if mutlitask:
+        learner_callback = MultiTaskClassLearner(learn)
+        learn.callbacks.append(learner_callback)
+    
     if pretrained:
         if 'url' not in meta: 
             warn("There are no pretrained weights for that architecture yet!")

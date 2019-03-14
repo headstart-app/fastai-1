@@ -802,8 +802,9 @@ class MultiLabelList(Dataset):
     def process(self, xp:PreProcessor=None, yp:PreProcessor=None, name:str=None):
         "Launch the processing on `self.x` and `self.y` with `xp` and `yp`."
         self.x.process(xp)
-        for _y,_yp in zip(self.y, yp):
-            _y.process(_yp)
+        if yp is not None:
+            for _y,_yp in zip(self.y, yp):
+                _y.process(_yp)
 
         return self
 

@@ -5,7 +5,7 @@ from .basic_data import *
 from .basic_train import *
 
 __all__ = ['BnFreeze', 'GradientClipping', 'ShowGraph', 'ClassificationInterpretation', 'fit_one_cycle', 'lr_find', 'one_cycle_scheduler', 'to_fp16', 'to_fp32',
-           'mixup']
+           'mixup', 'MultiTaskClassificationInterpretation']
 
 def one_cycle_scheduler(lr_max:float, **kwargs:Any)->OneCycleScheduler:
     "Instantiate a `OneCycleScheduler` with `lr_max`."
@@ -96,6 +96,66 @@ def clip_grad(learn:Learner, clip:float=0.1)->Learner:
     return learn
 
 Learner.clip_grad = clip_grad
+
+class MultiTaskClassificationInterpretation():
+    "Interpretation methods for classification models."
+    def __init__(self, learn:Learner, probs:Tensor, y_true:Tensor, ds_type:DatasetType=DatasetType.Valid):
+        self.data,self.probs,self.y_true,self.ds_type, self.learn= learn.data,probs,y_true,ds_type,learn
+        self.pred_class = []
+        for prob in self.probs:
+            self.pred_class.append(prob.argmax(dim=1))
+        
+
+    @classmethod
+    def from_learner(cls, learn: Learner,  ds_type:DatasetType=DatasetType.Valid):
+        "Create an instance of `ClassificationInterpretation`"
+        preds = learn.get_preds(ds_type=ds_type)
+        return cls(learn, *preds)
+
+    def confusion_matrix(self, slice_size:int=1):
+        "Confusion matrix as an `np.ndarray`."
+        cms = []
+        dims  = self.data.c
+        for idx, dim in enumerate(dims):
+            x=torch.arange(0, dim)
+            if slice_size is None: 
+                cm = ((self.pred_class[idx]==x[:,None]) & (self.y_true[:,idx]==x[:,None,None])).sum(2)
+            else:
+                cm = torch.zeros(dim, dim, dtype=x.dtype)
+                for i in range(0, self.y_true[:,idx].shape[0], slice_size):
+                    cm_slice = ((self.pred_class[idx][i:i+slice_size]==x[:,None])
+                                & (self.y_true[:,idx][i:i+slice_size]==x[:,None,None])).sum(2)
+                    torch.add(cm, cm_slice, out=cm)
+            cms.append(to_np(cm))        
+        return cms
+
+    def plot_confusion_matrix(self, normalize:bool=False, title:str='Confusion matrix', cmap:Any="Blues", slice_size:int=1, 
+                              norm_dec:int=2, plot_txt:bool=True, **kwargs)->None:
+        "Plot the confusion matrix, with `title` and using `cmap`."
+        # This function is mainly copied from the sklearn docs
+        cms = self.confusion_matrix(slice_size=slice_size)
+        for idx, cm in enumerate(cms):
+            if normalize: cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+            plt.figure(**kwargs)
+            plt.imshow(cm, interpolation='nearest', cmap=cmap)
+            plt.title(title)
+            tick_marks = np.arange(self.data.c[idx])
+            plt.xticks(tick_marks, self.data.y[idx].classes, rotation=90)
+            plt.yticks(tick_marks, self.data.y[idx].classes, rotation=0)
+
+            if plot_txt:
+                thresh = cm.max() / 2.
+                for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+                    coeff = f'{cm[i, j]:.{norm_dec}f}' if normalize else f'{cm[i, j]}'
+                    plt.text(j, i, coeff, horizontalalignment="center", color="white" if cm[i, j] > thresh else "black")
+
+            plt.tight_layout()
+            plt.ylabel('Actual')
+            plt.xlabel('Predicted')
+            plt.xlabel('Predicted')
+            plt.close()
+
+
 
 class ClassificationInterpretation():
     "Interpretation methods for classification models."
