@@ -153,9 +153,6 @@ class MultiTaskClassificationInterpretation():
             plt.ylabel('Actual')
             plt.xlabel('Predicted')
             plt.xlabel('Predicted')
-            plt.close()
-
-
 
 class ClassificationInterpretation():
     "Interpretation methods for classification models."
