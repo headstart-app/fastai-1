@@ -47,7 +47,7 @@ def num_cpus()->int:
     try:                   return len(os.sched_getaffinity(0))
     except AttributeError: return os.cpu_count()
 
-_default_cpus = min(1, num_cpus())
+_default_cpus = num_cpus()
 defaults = SimpleNamespace(cpus=_default_cpus, cmap='viridis')
 
 def is_listy(x:Any)->bool: return isinstance(x, (tuple,list))

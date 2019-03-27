@@ -432,7 +432,6 @@ class ItemLists():
         return f'{self.__class__.__name__};\n\nTrain: {self.train};\n\nValid: {self.valid};\n\nTest: {self.test}'
 
     def __getattr__(self, k):
-        
         ft = getattr(self.train, k)
         if not isinstance(ft, Callable): return ft
         fv = getattr(self.valid, k)
@@ -526,8 +525,12 @@ class LabelLists(ItemLists):
     def add_test(self, items:Iterator, label:Any=None):
         "Add test set containing `items` with an arbitrary `label`."
         # if no label passed, use label of first training item
-        if label is None: labels = EmptyLabelList([0] * len(items))
-        else: labels = self.valid.y.new([label] * len(items)).process()
+        if label is None: 
+            labels = EmptyLabelList([0] * len(items))
+        elif isinstance(label, list): 
+            labels = label
+        else: 
+            labels = self.valid.y.new([label] * len(items)).process()
         if isinstance(items, ItemList): items = self.valid.x.new(items.items, xtra=items.xtra).process()
         else: items = self.valid.x.new(items).process()          
         self.test = self.valid.new(items, labels)

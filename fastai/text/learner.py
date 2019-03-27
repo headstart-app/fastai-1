@@ -87,6 +87,7 @@ class RNNLearner(Learner):
             preds[0],preds[1] = preds[0][reverse_sampler],preds[1][reverse_sampler]
         return(preds)
 
+
 def decode_spec_tokens(tokens):
     new_toks,rule,arg = [],None,None
     for t in tokens:

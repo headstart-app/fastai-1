@@ -197,12 +197,17 @@ class TextDataBunch(DataBunch):
         processor = _get_processor(tokenizer=tokenizer, vocab=vocab, chunksize=chunksize, max_vocab=max_vocab,
                                    min_freq=min_freq, mark_fields=mark_fields)
         if classes is None and is_listy(label_cols) and len(label_cols) > 1 and 'multi_task_list' not in kwargs: classes = label_cols
-            
         src = ItemLists(path, TextList.from_df(train_df, path, cols=text_cols, processor=processor),
                         TextList.from_df(valid_df, path, cols=text_cols, processor=processor))
         if cls==TextLMDataBunch: src = src.label_for_lm() 
         else: src = src.label_from_df(cols=label_cols, classes=classes, label_delim=label_delim, **kwargs)
-        if test_df is not None: src.add_test(TextList.from_df(test_df, path, cols=text_cols))
+        if test_df is not None: 
+            if len(label_cols) > 0:
+                test_ds = TextList.from_df(test_df, path, cols=text_cols)
+                test_ds_processed = test_ds.label_from_df(cols=label_cols, classes=classes, label_delim=label_delim, **kwargs)
+                src.add_test(test_ds_processed.x, label = test_ds_processed.y)
+            else:
+                src.add_test(TextList.from_df(test_df, path, cols=text_cols))    
         return src.databunch(**kwargs)
 
     @classmethod
