@@ -509,7 +509,7 @@ class LabelLists(ItemLists):
             if getattr(ds, 'warn', False): warn(ds.warn)
         return self
 
-    def databunch(self, path:PathOrStr=None, bs:int=10, val_bs:int=None, num_workers:int=defaults.cpus, 
+    def databunch(self, path:PathOrStr=None, bs:int=32, val_bs:int=None, num_workers:int=defaults.cpus, 
                   dl_tfms:Optional[Collection[Callable]]=None, device:torch.device=None, collate_fn:Callable=data_collate, 
                   no_check:bool=False, **kwargs)->'DataBunch':
         "Create an `DataBunch` from self, `path` will override `self.path`, `kwargs` are passed to `DataBunch.create`."
