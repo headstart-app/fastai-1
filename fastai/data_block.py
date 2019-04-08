@@ -236,7 +236,7 @@ class ItemList():
         if 'multi_task_list' in kwargs and kwargs['multi_task_list']:
             ys = []
             for label in np.rot90(labels):
-                ys.append(CategoryList(label, path=self.path, **kwargs))
+                ys.append(OutlierCategoryList(label, path=self.path, **kwargs))
             ys.reverse()  
             res = MultiLabelList(x=self, y=ys)
             return res
@@ -333,7 +333,6 @@ class CategoryList(CategoryListBase):
     _processor=CategoryProcessor
     def __init__(self, items:Iterator, classes:Collection=None, label_delim:str=None, **kwargs):
         super().__init__(items, classes=classes, **kwargs)
-        
         self.loss_func = CrossEntropyFlat()
 
     def get(self, i):
@@ -341,7 +340,32 @@ class CategoryList(CategoryListBase):
         if o is None: return None
         return Category(o, self.classes[o])
 
-    def analyze_pred(self, pred, thresh:float=0.5): return pred.argmax()
+    def analyze_pred(self, pred, thresh:float=0.5): 
+        return pred.argmax()
+
+    def reconstruct(self, t):
+        return Category(t, self.classes[t])
+
+class OutlierCategoryList(CategoryListBase):
+    "`ItemList` for single classification labels with outliers that have higher probability threshold."
+    _processor=CategoryProcessor    
+    def __init__(self, items:Iterator, outlier:str='other', outlier_thresh:float=0.7, classes:Collection=None, label_delim:str=None, **kwargs):
+        super().__init__(items, classes=classes, **kwargs)
+        self.loss_func = CrossEntropyFlat()
+        self.outlier = outlier
+        self.outlier_thresh = outlier_thresh
+
+    def get(self, i):
+        o = self.items[i]
+        if o is None: return None
+        return Category(o, self.classes[o])
+
+    def analyze_pred(self, pred, thresh:float=0.5):
+        if self.outlier in self.classes:
+            outlier_index = self.classes.index(self.outlier)
+            if pred[outlier_index] < self.outlier_thresh:
+                pred[outlier_index] = 0.0 
+        return pred.argmax()
 
     def reconstruct(self, t):
         return Category(t, self.classes[t])
@@ -382,6 +406,7 @@ class MultiCategoryList(CategoryListBase):
         self.loss_func = BCEWithLogitsFlat()
         self.one_hot = one_hot
         self.copy_new += ['one_hot']
+
 
     def get(self, i):
         o = self.items[i]
