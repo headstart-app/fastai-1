@@ -349,22 +349,21 @@ class CategoryList(CategoryListBase):
 class OutlierCategoryList(CategoryListBase):
     "`ItemList` for single classification labels with outliers that have higher probability threshold."
     _processor=CategoryProcessor    
-    def __init__(self, items:Iterator, outlier:str='other', outlier_thresh:float=0.7, classes:Collection=None, label_delim:str=None, **kwargs):
+    def __init__(self, items:Iterator, outlier:str='other', classes:Collection=None, label_delim:str=None, **kwargs):
         super().__init__(items, classes=classes, **kwargs)
         self.loss_func = CrossEntropyFlat()
         self.outlier = outlier
-        self.outlier_thresh = outlier_thresh
 
     def get(self, i):
         o = self.items[i]
         if o is None: return None
         return Category(o, self.classes[o])
 
-    def analyze_pred(self, pred, thresh:float=0.5):
+    def analyze_pred(self, pred, outlier_thresh:float=0.8, thresh:float=0.5):
         if self.outlier in self.classes:
             outlier_index = self.classes.index(self.outlier)
-            if pred[outlier_index] < self.outlier_thresh:
-                pred[outlier_index] = 0.0 
+            if (pred[0][outlier_index] < outlier_thresh) == 1:
+                pred[0][outlier_index] = 0.0 
         return pred.argmax()
 
     def reconstruct(self, t):

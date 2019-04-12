@@ -199,7 +199,7 @@ class TextDataBunch(DataBunch):
         if classes is None and is_listy(label_cols) and len(label_cols) > 1 and 'multi_task_list' not in kwargs: classes = label_cols
         src = ItemLists(path, TextList.from_df(train_df, path, cols=text_cols, processor=processor),
                         TextList.from_df(valid_df, path, cols=text_cols, processor=processor))
-        if cls==TextLMDataBunch: src = src.label_for_lm() 
+        if cls == TextLMDataBunch: src = src.label_for_lm()   
         else: src = src.label_from_df(cols=label_cols, classes=classes, label_delim=label_delim, **kwargs)
         if test_df is not None: 
             if len(label_cols) > 0:
@@ -262,10 +262,10 @@ class TextClasDataBunch(TextDataBunch):
         "Function that transform the `datasets` in a `DataBunch` for classification."
         datasets = cls._init_ds(train_ds, valid_ds, test_ds)
         val_bs = ifnone(val_bs, bs)
-        collate_fn = partial(pad_collate, pad_idx=pad_idx, pad_first=pad_first, backwards=backwards)
-            
+        collate_fn = partial(pad_collate, pad_idx=pad_idx, pad_first=pad_first, backwards=backwards)            
         train_sampler = SortishSampler(datasets[0].x, key=lambda t: len(datasets[0][t][0].data), bs=bs//2)
-        kwargs.pop('multi_task_list', None)
+        if type(train_ds.y) is list:
+            kwargs.pop('multi_task_list', None)
         train_dl = DataLoader(datasets[0], batch_size=bs, sampler=train_sampler, drop_last=True, **kwargs)
         dataloaders = [train_dl]
         for ds in datasets[1:]:
