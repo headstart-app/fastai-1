@@ -362,7 +362,6 @@ class Learner():
 
     def predict(self, item:ItemBase, **kwargs):
         "Return predicted class, label and probabilities for `item`."
-        pdb.set_trace()
         batch = self.data.one_item(item)
         res = self.pred_batch(batch=batch)
         pred,x = res[0],batch[0]
@@ -383,6 +382,28 @@ class Learner():
             preds = ds.y.analyze_pred(pred, **kwargs)
             out = ds.y.reconstruct(preds, ds.x.reconstruct(x[0])) if has_arg(ds.y.reconstruct, 'x') else ds.y.reconstruct(preds)        
         return out, preds, res[0]
+
+    def predict_class_probs(self, item:ItemBase, **kwargs):
+        "Return predicted class, label and probabilities for `item`."
+        batch = self.data.one_item(item)
+        res = self.pred_batch(batch=batch)
+        pred,x = res[0],batch[0]
+        norm = getattr(self.data,'norm',False)
+        if norm:
+            x = self.data.denorm(x)
+            if norm.keywords.get('do_y',False): pred = self.data.denorm(pred)
+        ds = self.data.single_ds
+        if isinstance(pred, list):
+            preds = []
+            out = []
+            for i,e in enumerate(pred):
+                elem = ds.y[i].analyze_pred(e, **kwargs)
+                preds.append(elem)
+                out.append(ds.y[i].classes)
+        else:
+            preds = ds.y.analyze_pred(pred, **kwargs)
+            out = ds.y.classes      
+        return out, preds, res[0]        
 
     def validate(self, dl=None, callbacks=None, metrics=None):
         "Validate on `dl` with potential `callbacks` and `metrics`."
