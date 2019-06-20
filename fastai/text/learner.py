@@ -7,6 +7,7 @@ from ..basic_data import *
 from ..datasets import *
 from ..metrics import accuracy
 from ..metrics import multi_task_accuracy
+import pdb
 from ..train import GradientClipping
 from .models import *
 from .transform import *
@@ -81,6 +82,7 @@ class RNNLearner(Learner):
         "Return predictions and targets on the valid, train, or test set, depending on `ds_type`."
         self.model.reset()
         preds = super().get_preds(ds_type=ds_type, with_loss=with_loss, n_batch=n_batch, pbar=pbar)
+        pdb.set_trace()
         if ordered and hasattr(self.dl(ds_type), 'sampler'):
             sampler = [i for i in self.dl(ds_type).sampler]
             reverse_sampler = np.argsort(sampler)
