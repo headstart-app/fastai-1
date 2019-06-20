@@ -362,6 +362,7 @@ class Learner():
 
     def predict(self, item:ItemBase, **kwargs):
         "Return predicted class, label and probabilities for `item`."
+        pdb.set_trace()
         batch = self.data.one_item(item)
         res = self.pred_batch(batch=batch)
         pred,x = res[0],batch[0]
